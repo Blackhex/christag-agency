@@ -65,6 +65,9 @@
 
       <div class="space-y-0.5" onclick="if(window.innerWidth<768){document.getElementById('sidebar').classList.add('-translate-x-full');document.getElementById('overlay').classList.add('hidden')}">
         {% if not admin_active %}
+        <a href="/{{ group }}/agents" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 {% if active == 'agents' %}active{% endif %}">
+          Agents
+        </a>
         <a href="/{{ group }}/" class="block px-3 py-2 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-100 {% if active == 'home' %}active{% endif %}">
           Inbox
         </a>

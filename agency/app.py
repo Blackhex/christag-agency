@@ -1042,6 +1042,19 @@ async def admin_agent_delete(request: Request, org: str, agent: str):
 # ── Group Routes ──────────────────────────────────────────────────────────────
 
 
+@app.get("/{group}/agents", response_class=HTMLResponse)
+async def agents_list(request: Request, group: str):
+    """List all agents with identity and health info."""
+    g = get_group(group)
+    agents, subagents = collect_agents_with_identity(g)
+    return templates.TemplateResponse("agents.html", {
+        "request": request,
+        **group_context(g),
+        "agents": agents,
+        "subagents": subagents,
+    })
+
+
 @app.get("/{group}/", response_class=HTMLResponse)
 async def home(request: Request, group: str):
     """Dashboard home — inbox of items needing attention."""
