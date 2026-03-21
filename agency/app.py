@@ -1055,6 +1055,35 @@ async def agents_list(request: Request, group: str):
     })
 
 
+@app.get("/{group}/agents/{agent}", response_class=HTMLResponse)
+async def agent_profile(request: Request, group: str, agent: str):
+    """View an agent's profile with identity, logs, clues, and memory."""
+    g = get_group(group)
+    agent_dir = resolve_agent_dir(g, agent)
+    identity = parse_agent_identity(agent_dir)
+    is_subagent = (g["path"] / "_subagents" / agent).is_dir() or identity["frontmatter"].get("subagent", False)
+    last_seen = get_agent_last_seen(g, agent)
+    logs = get_agent_logs(g, agent)
+    clues = [c for c in list_clues(g) if c.get("agent") == agent][:10]
+    has_headshot = find_headshot(agent_dir) is not None
+    has_memory = (agent_dir / "memory.md").exists()
+    memory_path = str(agent_dir / "memory.md") if has_memory else ""
+
+    return templates.TemplateResponse("agent_profile.html", {
+        "request": request,
+        **group_context(g),
+        "agent": agent,
+        "identity": identity,
+        "is_subagent": is_subagent,
+        "last_seen": last_seen,
+        "logs": logs,
+        "clues": clues,
+        "has_headshot": has_headshot,
+        "has_memory": has_memory,
+        "memory_path": memory_path,
+    })
+
+
 @app.get("/{group}/", response_class=HTMLResponse)
 async def home(request: Request, group: str):
     """Dashboard home — inbox of items needing attention."""
