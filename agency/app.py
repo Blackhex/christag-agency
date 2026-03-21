@@ -113,6 +113,8 @@ def group_context(g: dict) -> dict:
         "nav_open_clues": open_clue_count,
         "nav_actionable": actionable_curiosity_count,
         "nav_agent_count": len(g["agents"]),
+        "show_tips": CONFIG.get("agency", {}).get("show_tips", True) is not False,
+        "tips_dismissed": CONFIG.get("agency", {}).get("tips_dismissed", []),
     }
 
 
@@ -641,6 +643,46 @@ async def setup_process(request: Request):
         (path / agent).mkdir(exist_ok=True)
 
     return RedirectResponse(f"/{key}/", status_code=303)
+
+
+# ── Tip Routes ────────────────────────────────────────────────────────────────
+
+
+@app.post("/tips/dismiss", response_class=HTMLResponse)
+async def tip_dismiss(request: Request):
+    """Dismiss a specific tip card."""
+    form = await request.form()
+    tip_id = form.get("tip_id", "").strip()
+    redirect = safe_redirect(form.get("redirect", "/"))
+
+    if tip_id:
+        config = load_config()
+        if "agency" not in config:
+            config["agency"] = {}
+        dismissed = config["agency"].get("tips_dismissed", [])
+        if tip_id not in dismissed:
+            dismissed.append(tip_id)
+            config["agency"]["tips_dismissed"] = dismissed
+            save_config(config)
+            reload_groups()
+
+    return RedirectResponse(redirect, status_code=303)
+
+
+@app.post("/tips/hide-all", response_class=HTMLResponse)
+async def tip_hide_all(request: Request):
+    """Hide all tip cards globally."""
+    form = await request.form()
+    redirect = safe_redirect(form.get("redirect", "/"))
+
+    config = load_config()
+    if "agency" not in config:
+        config["agency"] = {}
+    config["agency"]["show_tips"] = False
+    save_config(config)
+    reload_groups()
+
+    return RedirectResponse(redirect, status_code=303)
 
 
 # ── Admin Routes ──────────────────────────────────────────────────────────────
