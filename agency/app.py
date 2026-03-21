@@ -89,12 +89,14 @@ def get_group(group: str) -> dict:
 def group_context(g: dict) -> dict:
     """Return standard template context for a group."""
     agency = get_agency_config()
+    group_cfg = GROUPS.get(g["key"], {})
     return {
         "group": g["key"],
         "group_name": g["name"],
         "groups": {k: v["name"] for k, v in GROUPS.items()},
         "agency_title": agency.get("title", "Agency"),
         "admin_active": False,
+        "tmux_config_available": bool(group_cfg.get("tmux_config")),
     }
 
 
@@ -592,6 +594,7 @@ async def admin_org_new(request: Request):
         "org_name": "",
         "org_path": "",
         "org_agents": "",
+        "org_tmux_config": "",
         "agent_infos": [],
         "warning": "",
     })
@@ -606,6 +609,7 @@ async def admin_org_create(request: Request):
     path = form.get("path", "").strip()
     agents_raw = form.get("agents", "").strip()
     agents = [a.strip() for a in agents_raw.splitlines() if a.strip()]
+    tmux_config = form.get("tmux_config", "").strip()
 
     if not key or not name or not path:
         agency = get_agency_config()
@@ -621,6 +625,7 @@ async def admin_org_create(request: Request):
             "org_name": name,
             "org_path": path,
             "org_agents": agents_raw,
+            "org_tmux_config": tmux_config,
             "agent_infos": [],
             "warning": "Key, name, and path are required.",
         })
@@ -633,11 +638,14 @@ async def admin_org_create(request: Request):
     if not Path(path).exists():
         warning = f"Warning: Path {path} does not exist on disk. You can create it later via Initialize."
 
-    config["groups"][key] = {
+    group_cfg = {
         "name": name,
         "path": path,
         "agents": agents,
     }
+    if tmux_config:
+        group_cfg["tmux_config"] = tmux_config
+    config["groups"][key] = group_cfg
 
     save_config(config)
     reload_groups()
@@ -655,6 +663,7 @@ async def admin_org_create(request: Request):
             "org_name": name,
             "org_path": path,
             "org_agents": "\n".join(agents),
+            "org_tmux_config": tmux_config,
             "agent_infos": [get_agent_info(Path(path), a) for a in agents] if Path(path).exists() else [],
             "warning": warning + " Org saved successfully.",
         })
@@ -688,6 +697,7 @@ async def admin_org_edit(request: Request, org: str):
         "org_name": g["name"],
         "org_path": g["path"],
         "org_agents": "\n".join(g.get("agents", [])),
+        "org_tmux_config": g.get("tmux_config", ""),
         "agent_infos": agent_infos,
         "warning": "",
     })
@@ -701,6 +711,7 @@ async def admin_org_save(request: Request, org: str):
     path = form.get("path", "").strip()
     agents_raw = form.get("agents", "").strip()
     agents = [a.strip() for a in agents_raw.splitlines() if a.strip()]
+    tmux_config = form.get("tmux_config", "").strip()
 
     config = load_config()
     if org not in config.get("groups", {}):
@@ -714,6 +725,10 @@ async def admin_org_save(request: Request, org: str):
     if path:
         config["groups"][org]["path"] = path
     config["groups"][org]["agents"] = agents
+    if tmux_config:
+        config["groups"][org]["tmux_config"] = tmux_config
+    elif "tmux_config" in config["groups"][org]:
+        del config["groups"][org]["tmux_config"]
 
     save_config(config)
     reload_groups()
@@ -731,6 +746,7 @@ async def admin_org_save(request: Request, org: str):
             "org_name": config["groups"][org]["name"],
             "org_path": config["groups"][org]["path"],
             "org_agents": "\n".join(agents),
+            "org_tmux_config": tmux_config,
             "agent_infos": [get_agent_info(Path(config["groups"][org]["path"]), a) for a in agents],
             "warning": warning + " Changes saved.",
         })
@@ -1600,6 +1616,38 @@ async def memory_save(request: Request, group: str):
 
     fpath.write_text(content)
     return RedirectResponse(f"/{group}/memory/view?path={path}", status_code=303)
+
+
+@app.get("/{group}/tmux-config", response_class=HTMLResponse)
+async def tmux_config_view(request: Request, group: str):
+    """View/edit the tmux config file for a group."""
+    g = get_group(group)
+    tmux_path = GROUPS.get(group, {}).get("tmux_config", "")
+    if not tmux_path:
+        raise HTTPException(404, "No tmux config set for this group")
+    fpath = Path(tmux_path)
+    if not fpath.exists():
+        raise HTTPException(404, f"Tmux config file not found: {tmux_path}")
+    raw = fpath.read_text()
+    return templates.TemplateResponse("tmux_config.html", {
+        "request": request,
+        **group_context(g),
+        "raw": raw,
+        "filepath": tmux_path,
+    })
+
+
+@app.post("/{group}/tmux-config/save", response_class=HTMLResponse)
+async def tmux_config_save(request: Request, group: str):
+    """Save edits to the tmux config file."""
+    g = get_group(group)
+    tmux_path = GROUPS.get(group, {}).get("tmux_config", "")
+    if not tmux_path:
+        raise HTTPException(404, "No tmux config set for this group")
+    form = await request.form()
+    content = form.get("content", "")
+    Path(tmux_path).write_text(content)
+    return RedirectResponse(f"/{group}/tmux-config", status_code=303)
 
 
 def main():
