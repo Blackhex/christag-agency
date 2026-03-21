@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% set active = "decisions" %}
+
+{% block title %}{{ slug }} - Decisions{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="/{{ group }}/decisions" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to decisions</a>
+</div>
+
+<div class="bg-white rounded-lg border border-gray-200 p-6">
+  <div class="flex items-start justify-between mb-4">
+    <h1 class="text-xl font-bold text-gray-900">{{ slug | replace("-", " ") | title }}</h1>
+    <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">{{ meta.get("decision", "") }}</span>
+  </div>
+
+  <div class="flex flex-wrap gap-x-6 gap-y-1 text-sm text-gray-500 mb-6 pb-4 border-b border-gray-100">
+    <span>Decided by: <strong>{{ meta.get("decided_by", "\u2014") }}</strong></span>
+    <span>Date: <strong>{{ meta.get("date", "\u2014") }}</strong></span>
+    {% if meta.get("curiosity") %}
+    <span>Curiosity: <a href="/{{ group }}/curiosities/{{ meta.curiosity | replace('.md', '') }}" class="text-indigo-600 underline">{{ meta.curiosity }}</a></span>
+    {% endif %}
+  </div>
+
+  <div class="prose max-w-none">
+    {{ body_html | safe }}
+  </div>
+</div>
+{% endblock %}

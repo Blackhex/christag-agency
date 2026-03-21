@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% set active = "prompts" %}
+
+{% block title %}Prompts - {{ group_name }}{% endblock %}
+
+{% block content %}
+<div class="flex items-baseline justify-between mb-6">
+  <h1 class="text-2xl font-bold text-gray-900">Agent Prompts</h1>
+  <span class="text-sm text-gray-500">{{ prompts|length }} prompts</span>
+</div>
+
+<p class="text-sm text-gray-500 mb-4">These prompts are executed by <code class="bg-gray-100 px-1 rounded">dispatch.sh</code> on schedule. Each defines what an agent does during a specific event window.</p>
+
+<div class="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+  {% for p in prompts %}
+  <a href="/{{ group }}/prompts/{{ p.slug }}" class="block px-4 py-3 hover:bg-gray-50 transition-colors">
+    <div class="flex items-center justify-between">
+      <span class="text-sm font-medium text-gray-900">{{ p.name }}</span>
+      <span class="text-xs text-gray-400">&rarr;</span>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% endblock %}

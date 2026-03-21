@@ -1,0 +1,15 @@
+[project]
+name = "agency"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "jinja2",
+    "markdown",
+    "pyyaml",
+    "markupsafe",
+]
+
+[project.scripts]
+agency = "app:main"

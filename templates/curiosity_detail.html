@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% set active = "curiosities" %}
+
+{% block title %}{{ slug }} - Curiosities{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="/{{ group }}/curiosities" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to curiosities</a>
+</div>
+
+<div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    {{ meta.get("origin_agent", "") | agent_badge }}
+    {{ meta.get("status", "") | status_badge }}
+  </div>
+  <h1 class="text-lg md:text-xl font-bold text-gray-900 mb-4">{{ slug | replace("-", " ") | title }}</h1>
+
+  <!-- Metadata -->
+  <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 mb-4 pb-4 border-b border-gray-100">
+    <span>Date: <strong>{{ meta.get("date", "\u2014") }}</strong></span>
+    <span>TTL: <strong>{{ meta.get("ttl_days", "\u2014") }} days</strong></span>
+    {% if meta.get("feedback_requested") %}
+    <span>Feedback: <strong>{{ meta.get("feedback_received", [])|length }}/{{ meta.feedback_requested|length }}</strong>
+      ({{ meta.feedback_requested | join(", ") }})
+    </span>
+    {% endif %}
+  </div>
+
+  <!-- Linked clues -->
+  {% if linked_clues %}
+  <div class="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
+    <span class="text-gray-500 font-medium">Linked clues:</span>
+    {% for lc in linked_clues %}
+    <a href="/{{ group }}/clues/{{ lc.slug }}" class="inline-block ml-1 text-indigo-600 underline text-xs">{{ lc.filename }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Existing decision -->
+  {% if decision %}
+  <div class="mb-4 p-4 bg-emerald-50 rounded-lg border border-emerald-200">
+    <div class="flex flex-wrap items-center gap-2 mb-2">
+      <span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">{{ decision.meta.get("decision", "") }}</span>
+      <span class="text-sm text-gray-600">by {{ decision.meta.get("decided_by", "\u2014") }} on {{ decision.meta.get("date", "\u2014") }}</span>
+    </div>
+    <div class="prose text-sm max-w-none">{{ decision.body | render_md }}</div>
+    <a href="/{{ group }}/decisions/{{ decision.slug }}" class="text-sm text-emerald-700 underline mt-2 inline-block">View decision</a>
+  </div>
+  {% endif %}
+
+  <!-- Body -->
+  <div class="prose max-w-none">
+    {{ body_html }}
+  </div>
+
+  <!-- Decision form (if no decision yet) -->
+  {% if not decision %}
+  <div class="mt-6 pt-4 border-t border-gray-100">
+    <h3 class="text-sm font-semibold text-gray-700 mb-3">Make a Decision</h3>
+    <form method="POST" action="/{{ group }}/curiosities/{{ slug }}/decide">
+      <div class="flex flex-wrap gap-3 mb-3">
+        <label class="flex items-center gap-1.5">
+          <input type="radio" name="decision" value="approved" checked class="text-emerald-600">
+          <span class="text-sm">Approve</span>
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input type="radio" name="decision" value="deferred" class="text-amber-600">
+          <span class="text-sm">Defer</span>
+        </label>
+        <label class="flex items-center gap-1.5">
+          <input type="radio" name="decision" value="rejected" class="text-red-600">
+          <span class="text-sm">Reject</span>
+        </label>
+      </div>
+      <textarea name="notes" rows="4" placeholder="Decision notes..." class="w-full border border-gray-300 rounded-lg p-3 text-sm mb-3"></textarea>
+      <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">Save Decision</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

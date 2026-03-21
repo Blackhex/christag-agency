@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% set active = "logs" %}
+
+{% block title %}{{ filename }} - Logs{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="/{{ group }}/logs" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to logs</a>
+</div>
+
+<div class="bg-white rounded-lg border border-gray-200 p-6">
+  <div class="flex items-center justify-between mb-4 pb-4 border-b border-gray-100">
+    <h1 class="text-lg font-bold text-gray-900 font-mono">{{ filename }}</h1>
+  </div>
+
+  <div class="prose max-w-none">
+    {{ content_html | safe }}
+  </div>
+</div>
+{% endblock %}

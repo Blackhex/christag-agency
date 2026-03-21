@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% set active = "clues" %}
+
+{% block title %}{{ slug }} - Clues{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="/{{ group }}/clues" class="text-sm text-indigo-600 hover:text-indigo-800">&larr; Back to clues</a>
+</div>
+
+<div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
+  <div class="flex flex-wrap items-center gap-2 mb-3">
+    {{ meta.get("agent", "") | agent_badge }}
+    {{ meta.get("status", "") | status_badge }}
+    {% if meta.get("float") %}<span class="text-xs text-amber-600 font-medium">Floated</span>{% endif %}
+  </div>
+  <h1 class="text-lg md:text-xl font-bold text-gray-900 mb-4">{{ slug | replace("-", " ") }}</h1>
+
+  <!-- Metadata -->
+  <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-gray-500 mb-6 pb-4 border-b border-gray-100">
+    <span>Category: <strong>{{ meta.get("category", "\u2014") }}</strong></span>
+    <span>Date: <strong>{{ meta.get("date", "\u2014")|string }}</strong></span>
+    <span>TTL: <strong>{{ meta.get("ttl_days", "\u2014") }} days</strong></span>
+  </div>
+
+  {% if meta.get("linked_curiosity") %}
+  <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200 text-sm">
+    Linked to curiosity: <a href="/{{ group }}/curiosities/{{ meta.linked_curiosity | replace('.md', '') }}" class="text-blue-700 underline font-medium">{{ meta.linked_curiosity }}</a>
+  </div>
+  {% endif %}
+
+  {% if meta.get("linked_clues") %}
+  <div class="mb-4 p-3 bg-gray-50 rounded-lg text-sm">
+    <span class="text-gray-500">Related clues:</span>
+    {% for lc in meta.linked_clues %}
+    <a href="/{{ group }}/clues/{{ lc | replace('.md', '') }}" class="inline-block ml-1 text-indigo-600 underline text-xs">{{ lc }}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Body -->
+  <div class="prose max-w-none">
+    {{ body_html }}
+  </div>
+
+  <!-- Status change -->
+  <div class="mt-6 pt-4 border-t border-gray-100">
+    <form method="POST" action="/{{ group }}/clues/{{ slug }}/status" class="flex flex-wrap items-center gap-3">
+      <label class="text-sm text-gray-600">Change status:</label>
+      <select name="status" class="text-sm border border-gray-300 rounded-lg px-3 py-1.5 bg-white">
+        {% for s in ["open", "connected", "dismissed", "archived"] %}
+        <option value="{{ s }}" {% if meta.get("status") == s %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">Update</button>
+    </form>
+  </div>
+</div>
+{% endblock %}

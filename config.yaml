@@ -1,0 +1,32 @@
+agency:
+  title: Agency
+  default_group: chrisos
+groups:
+  newsletter:
+    name: Newsletter Agents
+    path: /var/home/chris/dev/local-newsletter/agents
+    agents:
+    - product
+    - editorial
+    - design
+    - sales
+    - business-ops
+    - growth
+    - sources
+    - investigative
+    - engineering
+    - infrastructure
+  chrisos:
+    name: ChrisOS Agents
+    path: /var/home/chris/.claude/agents
+    agents:
+    - life-manager
+    - program-manager
+    - infrastructure
+    - home
+    - personal-style
+  agency:
+    name: Agency
+    path: /var/home/chris/dev/agency/agents
+    agents:
+    - product
