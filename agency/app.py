@@ -20,7 +20,7 @@ import uvicorn
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-CONFIG_PATH = Path(__file__).parent / "config.yaml"
+CONFIG_PATH = Path.cwd() / "config.yaml"
 
 
 def load_config() -> dict:

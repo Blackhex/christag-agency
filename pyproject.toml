@@ -12,4 +12,7 @@ dependencies = [
 ]
 
 [project.scripts]
-agency = "app:main"
+agency = "agency.app:main"
+
+[tool.setuptools.package-data]
+agency = ["templates/*.html"]

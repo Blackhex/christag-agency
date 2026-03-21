@@ -4,11 +4,10 @@ After=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/var/home/chris/dev/agency/.venv/bin/python3 app.py
+ExecStart=/var/home/chris/dev/agency/.venv/bin/python3 -m agency.app
 Restart=always
-User=chris
 WorkingDirectory=/var/home/chris/dev/agency
 Environment=HOME=/var/home/chris
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
