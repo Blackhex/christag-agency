@@ -24,9 +24,11 @@ CONFIG_PATH = Path.cwd() / "config.yaml"
 
 
 def load_config() -> dict:
-    """Read config.yaml and return dict."""
+    """Read config.yaml and return dict. Returns defaults if file doesn't exist."""
+    if not CONFIG_PATH.exists():
+        return {"agency": {"title": "Agency", "default_group": ""}, "groups": {}}
     with open(CONFIG_PATH) as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
 
 
 def save_config(config: dict) -> None:
@@ -54,12 +56,11 @@ GROUPS = CONFIG.get("groups", {})
 
 def get_agency_config() -> dict:
     """Return agency-level config with defaults."""
-    cfg = load_config()
-    groups = cfg.get("groups", {})
-    return cfg.get("agency", {
-        "title": "Agency",
-        "default_group": list(groups.keys())[0] if groups else "default",
-    })
+    agency = CONFIG.get("agency", {})
+    return {
+        "title": agency.get("title", "Agency"),
+        "default_group": agency.get("default_group", "") or (list(GROUPS.keys())[0] if GROUPS else ""),
+    }
 
 
 app = FastAPI(title="Agency Dashboard")
@@ -1291,7 +1292,20 @@ async def memory_save(request: Request, group: str):
 
 
 def main():
-    uvicorn.run(app, host="0.0.0.0", port=8500)
+    import argparse
+    parser = argparse.ArgumentParser(description="Agency — Agent Management Dashboard")
+    parser.add_argument("--port", type=int, default=8500, help="Port to serve on (default: 8500)")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+    args = parser.parse_args()
+
+    # First-run: create default config
+    if not CONFIG_PATH.exists():
+        save_config({"agency": {"title": "Agency", "default_group": ""}, "groups": {}})
+        print(f"First run — created config.yaml in {CONFIG_PATH.parent}")
+        print(f"Visit http://localhost:{args.port}/admin/ to set up your first agent group.")
+
+    reload_groups()
+    uvicorn.run(app, host=args.host, port=args.port)
 
 
 if __name__ == "__main__":
