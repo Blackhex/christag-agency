@@ -329,6 +329,180 @@ templates.env.filters["agent_badge"] = agent_badge
 templates.env.filters["render_md"] = render_md
 
 
+# ── Agent Helpers ─────────────────────────────────────────────────────────────
+
+
+def resolve_agent_dir(g: dict, agent_name: str) -> Path:
+    """Find an agent's directory, checking root and _subagents/. Raises 404 if not found."""
+    if "/" in agent_name or ".." in agent_name:
+        raise HTTPException(400, "Invalid agent name")
+    agent_dir = g["path"] / agent_name
+    if agent_dir.is_dir():
+        return agent_dir
+    sub_dir = g["path"] / "_subagents" / agent_name
+    if sub_dir.is_dir():
+        return sub_dir
+    raise HTTPException(404, f"Agent not found: {agent_name}")
+
+
+def parse_agent_identity(agent_dir: Path) -> dict:
+    """Read CLAUDE.md and return identity fields + body."""
+    claude_md = agent_dir / "CLAUDE.md"
+    if not claude_md.exists():
+        return {"display_name": agent_dir.name, "title": "", "emoji": "", "body": "", "frontmatter": {}}
+    raw = claude_md.read_text()
+    meta, body = parse_frontmatter(raw)
+    return {
+        "display_name": meta.get("display_name", agent_dir.name),
+        "title": meta.get("title", ""),
+        "emoji": meta.get("emoji", ""),
+        "body": body,
+        "frontmatter": meta,
+    }
+
+
+def save_agent_identity(agent_dir: Path, fields: dict) -> None:
+    """Merge identity fields into CLAUDE.md frontmatter, preserving other fields."""
+    claude_md = agent_dir / "CLAUDE.md"
+    if claude_md.exists():
+        raw = claude_md.read_text()
+        meta, body = parse_frontmatter(raw)
+    else:
+        meta, body = {}, ""
+    for key in ("display_name", "title", "emoji"):
+        if key in fields and fields[key]:
+            meta[key] = fields[key]
+        elif key in fields and not fields[key] and key in meta:
+            del meta[key]
+    if meta:
+        front = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+        claude_md.write_text(f"---\n{front}\n---\n\n{body}")
+    else:
+        claude_md.write_text(body)
+
+
+def save_agent_definition(agent_dir: Path, new_body: str) -> None:
+    """Write CLAUDE.md body preserving all existing frontmatter."""
+    claude_md = agent_dir / "CLAUDE.md"
+    if claude_md.exists():
+        raw = claude_md.read_text()
+        meta, _ = parse_frontmatter(raw)
+    else:
+        meta = {}
+    if meta:
+        front = yaml.dump(meta, default_flow_style=False, sort_keys=False).strip()
+        claude_md.write_text(f"---\n{front}\n---\n\n{new_body}")
+    else:
+        claude_md.write_text(new_body)
+
+
+def find_headshot(agent_dir: Path) -> Path | None:
+    """Find headshot file by checking extensions in order."""
+    for ext in ("png", "jpg", "jpeg", "webp"):
+        p = agent_dir / f"headshot.{ext}"
+        if p.exists():
+            return p
+    return None
+
+
+def get_agent_last_seen(g: dict, agent_name: str) -> datetime | None:
+    """Scan log date directories newest-first, return mtime of first matching file."""
+    logs_dir = g["shared"] / "logs"
+    if not logs_dir.exists():
+        return None
+    for date_dir in sorted(logs_dir.iterdir(), reverse=True):
+        if not date_dir.is_dir():
+            continue
+        for f in sorted(date_dir.iterdir(), reverse=True):
+            if f.name.startswith(f"{agent_name}-") and f.suffix in (".out", ".err"):
+                return datetime.fromtimestamp(f.stat().st_mtime)
+    return None
+
+
+def relative_time(dt: datetime | None) -> str:
+    """Format datetime as relative string."""
+    if dt is None:
+        return "No activity recorded"
+    now = datetime.now()
+    diff = now - dt
+    seconds = int(diff.total_seconds())
+    if seconds < 60:
+        return "Just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days <= 30:
+        return f"{days}d ago"
+    return dt.strftime("%Y-%m-%d")
+
+
+templates.env.filters["relative_time"] = relative_time
+
+
+def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
+    """Build full agent info lists. Returns (agents, subagents)."""
+    clues = list_clues(g)
+    agents = []
+    subagents = []
+
+    for agent_name in g["agents"]:
+        agent_dir = g["path"] / agent_name
+        if not agent_dir.is_dir():
+            continue
+        identity = parse_agent_identity(agent_dir)
+        open_count = sum(1 for c in clues if c.get("agent") == agent_name and c.get("status") == "open")
+        info = {
+            "name": agent_name, "dir": agent_dir, **identity,
+            "last_seen": get_agent_last_seen(g, agent_name),
+            "open_clues": open_count,
+            "is_subagent": identity["frontmatter"].get("subagent", False),
+            "has_headshot": find_headshot(agent_dir) is not None,
+        }
+        if info["is_subagent"]:
+            subagents.append(info)
+        else:
+            agents.append(info)
+
+    subagents_dir = g["path"] / "_subagents"
+    if subagents_dir.is_dir():
+        for d in sorted(subagents_dir.iterdir()):
+            if not d.is_dir() or d.name.startswith("."):
+                continue
+            if any(s["name"] == d.name for s in subagents):
+                continue
+            identity = parse_agent_identity(d)
+            open_count = sum(1 for c in clues if c.get("agent") == d.name and c.get("status") == "open")
+            subagents.append({
+                "name": d.name, "dir": d, **identity,
+                "last_seen": get_agent_last_seen(g, d.name),
+                "open_clues": open_count, "is_subagent": True,
+                "has_headshot": find_headshot(d) is not None,
+            })
+
+    return agents, subagents
+
+
+def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
+    """Get recent log files for an agent, newest first."""
+    logs_dir = g["shared"] / "logs"
+    if not logs_dir.exists():
+        return []
+    results = []
+    for date_dir in sorted(logs_dir.iterdir(), reverse=True):
+        if not date_dir.is_dir():
+            continue
+        for f in sorted(date_dir.iterdir(), reverse=True):
+            if f.name.startswith(f"{agent_name}-") and f.suffix in (".out", ".err"):
+                results.append({"name": f.name, "path": str(f), "date": date_dir.name, "size": f.stat().st_size, "suffix": f.suffix})
+                if len(results) >= limit:
+                    return results
+    return results
+
+
 # ── Routes ───────────────────────────────────────────────────────────────────
 
 
