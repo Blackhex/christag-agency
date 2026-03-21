@@ -14,5 +14,8 @@ dependencies = [
 [project.scripts]
 agency = "agency.app:main"
 
+[tool.setuptools.packages.find]
+include = ["agency*"]
+
 [tool.setuptools.package-data]
 agency = ["templates/*.html"]
