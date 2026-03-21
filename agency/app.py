@@ -12,7 +12,7 @@ from pathlib import Path
 import markdown
 import yaml
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from markupsafe import Markup
 
@@ -1082,6 +1082,101 @@ async def agent_profile(request: Request, group: str, agent: str):
         "has_memory": has_memory,
         "memory_path": memory_path,
     })
+
+
+@app.post("/{group}/agents/{agent}/identity", response_class=HTMLResponse)
+async def agent_save_identity(request: Request, group: str, agent: str):
+    """Save identity fields to CLAUDE.md frontmatter."""
+    g = get_group(group)
+    agent_dir = resolve_agent_dir(g, agent)
+    form = await request.form()
+    fields = {
+        "display_name": form.get("display_name", "").strip(),
+        "title": form.get("title", "").strip(),
+        "emoji": form.get("emoji", "").strip(),
+    }
+    save_agent_identity(agent_dir, fields)
+    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
+
+
+@app.post("/{group}/agents/{agent}/definition", response_class=HTMLResponse)
+async def agent_save_definition(request: Request, group: str, agent: str):
+    """Save CLAUDE.md body preserving frontmatter."""
+    g = get_group(group)
+    agent_dir = resolve_agent_dir(g, agent)
+    form = await request.form()
+    body = form.get("body", "")
+    save_agent_definition(agent_dir, body)
+    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
+
+
+@app.post("/{group}/agents/{agent}/upload-headshot", response_class=HTMLResponse)
+async def agent_upload_headshot(request: Request, group: str, agent: str):
+    """Upload a headshot image for an agent."""
+    g = get_group(group)
+    agent_dir = resolve_agent_dir(g, agent)
+    form = await request.form()
+    upload = form.get("headshot")
+    if not upload or not hasattr(upload, 'filename') or not upload.filename:
+        return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
+    ext = Path(upload.filename).suffix.lower().lstrip(".")
+    if ext not in ("png", "jpg", "jpeg", "webp"):
+        raise HTTPException(400, "Invalid image format. Use PNG, JPG, or WebP.")
+    content = await upload.read()
+    if len(content) > 2 * 1024 * 1024:
+        raise HTTPException(400, "Image too large. Maximum 2MB.")
+    # Remove any existing headshots
+    for old_ext in ("png", "jpg", "jpeg", "webp"):
+        old = agent_dir / f"headshot.{old_ext}"
+        if old.exists():
+            old.unlink()
+    (agent_dir / f"headshot.{ext}").write_bytes(content)
+    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
+
+
+@app.get("/{group}/agents/{agent}/headshot")
+async def agent_headshot(group: str, agent: str):
+    """Serve an agent's headshot image."""
+    g = get_group(group)
+    agent_dir = resolve_agent_dir(g, agent)
+    headshot = find_headshot(agent_dir)
+    if not headshot:
+        raise HTTPException(404, "No headshot")
+    return FileResponse(headshot)
+
+
+@app.post("/{group}/agents/{agent}/toggle-subagent", response_class=HTMLResponse)
+async def agent_toggle_subagent(request: Request, group: str, agent: str):
+    """Toggle an agent between regular and subagent status."""
+    g = get_group(group)
+    if "/" in agent or ".." in agent:
+        raise HTTPException(400, "Invalid agent name")
+    root_dir = g["path"] / agent
+    sub_dir = g["path"] / "_subagents" / agent
+    is_currently_subagent = sub_dir.is_dir()
+
+    config = load_config()
+    group_config = config["groups"][g["key"]]
+
+    if is_currently_subagent:
+        if root_dir.exists():
+            raise HTTPException(409, f"Cannot move: {root_dir} already exists")
+        shutil.move(str(sub_dir), str(root_dir))
+        if agent not in group_config.get("agents", []):
+            group_config.setdefault("agents", []).append(agent)
+    else:
+        if not root_dir.is_dir():
+            raise HTTPException(404, f"Agent directory not found: {agent}")
+        if sub_dir.exists():
+            raise HTTPException(409, f"Cannot move: {sub_dir} already exists")
+        (g["path"] / "_subagents").mkdir(exist_ok=True)
+        shutil.move(str(root_dir), str(sub_dir))
+        if agent in group_config.get("agents", []):
+            group_config["agents"].remove(agent)
+
+    save_config(config)
+    reload_groups()
+    return RedirectResponse(f"/{group}/agents/{agent}", status_code=303)
 
 
 @app.get("/{group}/", response_class=HTMLResponse)
