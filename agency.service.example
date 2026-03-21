@@ -1,0 +1,13 @@
+[Unit]
+Description=Agency Dashboard
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/path/to/agency/.venv/bin/python3 -m agency.app
+Restart=always
+WorkingDirectory=/path/to/agency
+Environment=HOME=/path/to/home
+
+[Install]
+WantedBy=default.target

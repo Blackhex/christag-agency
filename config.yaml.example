@@ -1,0 +1,10 @@
+agency:
+  title: Agency
+  default_group: my-project
+groups:
+  my-project:
+    name: My Project Agents
+    path: /path/to/your/agents
+    agents:
+    - agent-one
+    - agent-two

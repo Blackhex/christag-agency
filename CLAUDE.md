@@ -53,8 +53,8 @@ groups:
     name: Newsletter Agents        # Display name
     path: /path/to/agents          # Filesystem path to agent directories
     agents: [agent1, agent2, ...]  # List of agent directory names
-  chrisos:
-    name: ChrisOS Agents
+  another-group:
+    name: Another Group
     path: /path/to/agents
     agents: [agent1, agent2, ...]
 ```
@@ -74,7 +74,7 @@ Each group points to a directory containing agent subdirectories and a `shared/`
 ├── shared/
 │   ├── clues/             # Agent observations (markdown + frontmatter)
 │   ├── curiosities/       # Converged proposals
-│   ├── decisions/         # Chris's decisions
+│   ├── decisions/         # User decisions
 │   ├── prompts/           # Dispatch routine prompts
 │   ├── logs/              # Execution logs (YYYY-MM-DD subdirs)
 │   └── memory.md          # Cross-agent shared knowledge
@@ -165,7 +165,7 @@ ttl_days: 30
 
 ```yaml
 curiosity: slug.md             # Linked curiosity
-decided_by: chris
+decided_by: admin
 date: 2026-03-20
 decision: approved             # approved, deferred, rejected
 ```
@@ -197,20 +197,18 @@ Creates the standard agent group folder structure. Idempotent — only creates m
 - `shared/prompts/_clue-system-steps.md` (copies from first existing group that has one)
 - Per-agent directories from the agents list
 
-## Current Agent Groups
+## Example Agent Groups
 
-### Newsletter Agents
-- **Path:** `/var/home/chris/dev/local-newsletter/agents`
-- **10 agents:** product, editorial, design, sales, business-ops, growth, sources, investigative, engineering, infrastructure
-- **Dispatch:** `agents/shared/dispatch.sh` — time-windowed event dispatcher triggered by `newsletter-agents.timer`
-- **Focus:** Hyperlocal newsletter platform (3 newsletters covering Nassau County, Long Island)
+### Example: Newsletter Agents
+- **Agents:** product, editorial, design, sales, engineering, etc.
+- **Dispatch:** Systemd timer-triggered event dispatcher
+- **Focus:** Multi-agent newsletter production pipeline
 
-### ChrisOS Agents
-- **Path:** `~/.claude/agents`
-- **5 user-facing agents:** life-manager (orchestrator), program-manager (chief of staff), infrastructure (system admin), home (smart home + household), personal-style (wardrobe + inventory)
-- **4 subagents:** troubleshooter, gaming, calendar-advisor, obsidian-navigator (in `_subagents/`)
-- **Dispatch:** `shared/dispatch.sh` — 2-hour systemd timer with scheduled windows + event conditions
-- **Focus:** Chris's personal life management, system administration, and home automation
+### Example: Personal Agents
+- **Agents:** life-manager, infrastructure, home, etc.
+- **Subagents:** troubleshooter, gaming, calendar-advisor (in `_subagents/`)
+- **Dispatch:** 2-hour systemd timer with scheduled windows
+- **Focus:** Personal life management and system administration
 
 ## Development
 
@@ -275,7 +273,7 @@ Available in all templates:
 
 - **OS:** Fedora Kinoite 43 (immutable, rpm-ostree)
 - **Python:** System python in venv (no dnf/yum — this is immutable)
-- **Systemd:** User-level services only (`~/.config/systemd/user/`). System-level services CANNOT access `/var/home/chris/` on Fedora Kinoite — always use user-level.
+- **Systemd:** User-level services only (`~/.config/systemd/user/`). System-level services cannot access user home directories on Fedora Kinoite — always use user-level.
 - **Port:** 8500 (hardcoded in `app.py main()`)
 
 ## Future Ideas

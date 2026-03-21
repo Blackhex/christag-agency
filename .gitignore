@@ -4,3 +4,8 @@ __pycache__/
 dist/
 build/
 .venv/
+config.yaml
+agents/
+agency.service
+docs/superpowers/
+reports/

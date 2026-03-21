@@ -60,6 +60,7 @@ def get_agency_config() -> dict:
     return {
         "title": agency.get("title", "Agency"),
         "default_group": agency.get("default_group", "") or (list(GROUPS.keys())[0] if GROUPS else ""),
+        "decided_by": agency.get("decided_by", "admin"),
     }
 
 
@@ -303,25 +304,24 @@ def status_badge(status: str) -> Markup:
 
 def agent_badge(agent: str) -> Markup:
     """Return a colored badge for agent name."""
-    colors = {
-        "editorial": "bg-rose-100 text-rose-700",
-        "product": "bg-indigo-100 text-indigo-700",
-        "engineering": "bg-sky-100 text-sky-700",
-        "sources": "bg-teal-100 text-teal-700",
-        "growth": "bg-lime-100 text-lime-700",
-        "sales": "bg-orange-100 text-orange-700",
-        "design": "bg-fuchsia-100 text-fuchsia-700",
-        "business-ops": "bg-yellow-100 text-yellow-700",
-        "investigative": "bg-violet-100 text-violet-700",
-        "infrastructure": "bg-slate-100 text-slate-700",
-        "shared": "bg-gray-100 text-gray-700",
-        # ChrisOS agents
-        "life-manager": "bg-cyan-100 text-cyan-700",
-        "program-manager": "bg-indigo-100 text-indigo-700",
-        "home": "bg-amber-100 text-amber-700",
-        "personal-style": "bg-pink-100 text-pink-700",
-    }
-    cls = colors.get(agent or "", "bg-gray-100 text-gray-600")
+    palette = [
+        "bg-rose-100 text-rose-700",
+        "bg-indigo-100 text-indigo-700",
+        "bg-sky-100 text-sky-700",
+        "bg-teal-100 text-teal-700",
+        "bg-lime-100 text-lime-700",
+        "bg-orange-100 text-orange-700",
+        "bg-fuchsia-100 text-fuchsia-700",
+        "bg-yellow-100 text-yellow-700",
+        "bg-violet-100 text-violet-700",
+        "bg-cyan-100 text-cyan-700",
+        "bg-amber-100 text-amber-700",
+        "bg-pink-100 text-pink-700",
+        "bg-emerald-100 text-emerald-700",
+        "bg-slate-100 text-slate-700",
+    ]
+    idx = hash(agent or "") % len(palette)
+    cls = palette[idx]
     return Markup(f'<span class="inline-block px-2 py-0.5 rounded-full text-xs font-medium {cls}">{agent}</span>')
 
 
@@ -798,7 +798,7 @@ async def admin_org_initialize(request: Request, org: str):
     if not memory_path.exists():
         memory_path.write_text(f"# {g['name']} — Shared Memory\n\nCollective knowledge and decisions.\n")
 
-    # Copy _clue-system-steps.md from newsletter if it exists and target doesn't
+    # Copy _clue-system-steps.md from an existing group if available
     clue_steps_target = shared / "prompts" / "_clue-system-steps.md"
     if not clue_steps_target.exists():
         # Try to find an existing one to copy
@@ -1346,10 +1346,12 @@ async def curiosity_decide(request: Request, group: str, slug: str):
     decision_text = form.get("decision", "approved")
     notes = form.get("notes", "")
 
+    agency_cfg = get_agency_config()
+    decided_by = agency_cfg.get("decided_by", "admin")
     today = datetime.now().strftime("%Y-%m-%d")
     decision_content = f"""---
 curiosity: {slug}.md
-decided_by: chris
+decided_by: {decided_by}
 date: {today}
 decision: {decision_text}
 ---
