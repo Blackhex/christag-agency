@@ -35,14 +35,16 @@ agency
 agency --port 8500 --host 0.0.0.0
 ```
 
-On first run, Agency creates a default `config.yaml` and directs you to `http://localhost:8500/admin/` to set up your first agent group.
+On first run, Agency creates a default `config.yaml` and launches a setup wizard. Enter the path to your agent directory (or click the suggestion chip), and Agency auto-detects your agents, initializes the shared folder structure, and drops you into your Inbox.
 
-### Setting Up an Agent Group
+### Setting Up Additional Groups
+
+After the first-run wizard, you can add more groups from the admin panel:
 
 1. Go to **Settings** in the sidebar
 2. Click **+ Add New Group**
 3. Give it a name and point it to a directory containing your agent subdirectories
-4. Click **Initialize** to create the shared folder structure (`shared/clues/`, `shared/curiosities/`, etc.)
+4. Click **Initialize** to create the shared folder structure
 5. Use **Auto-detect Agents** to scan for directories containing a `CLAUDE.md`
 
 ### Expected Directory Structure
