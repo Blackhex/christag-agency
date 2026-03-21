@@ -87,6 +87,13 @@ def get_group(group: str) -> dict:
     }
 
 
+def safe_redirect(url: str, fallback: str = "/") -> str:
+    """Validate a redirect URL is a safe relative path."""
+    if url and url.startswith("/") and not url.startswith("//"):
+        return url
+    return fallback
+
+
 def group_context(g: dict) -> dict:
     """Return standard template context for a group."""
     agency = get_agency_config()
@@ -527,7 +534,113 @@ async def root(request: Request):
     first = list(GROUPS.keys())[0] if GROUPS else ""
     if first:
         return RedirectResponse(f"/{first}/", status_code=303)
-    return RedirectResponse("/admin/", status_code=303)
+    return RedirectResponse("/setup", status_code=303)
+
+
+# ── Setup Routes ─────────────────────────────────────────────────────────────
+
+
+@app.get("/setup", response_class=HTMLResponse)
+async def setup_page(request: Request):
+    """First-run wizard page."""
+    if GROUPS:
+        return RedirectResponse("/", status_code=303)
+    suggestion = str(Path.home() / ".claude" / "agents")
+    return templates.TemplateResponse("setup.html", {
+        "request": request,
+        "agency_title": get_agency_config().get("title", "Agency"),
+        "suggestion": suggestion,
+        "error": "",
+        "path_value": "",
+    })
+
+
+@app.post("/setup", response_class=HTMLResponse)
+async def setup_process(request: Request):
+    """Process first-run setup: scan path, create group, initialize, redirect."""
+    if GROUPS:
+        return RedirectResponse("/", status_code=303)
+
+    form = await request.form()
+    path_str = form.get("path", "").strip()
+    suggestion = str(Path.home() / ".claude" / "agents")
+    agency_title = get_agency_config().get("title", "Agency")
+
+    # Expand ~ and validate
+    path = Path(path_str).expanduser()
+    if not path.is_dir():
+        return templates.TemplateResponse("setup.html", {
+            "request": request,
+            "agency_title": agency_title,
+            "suggestion": suggestion,
+            "error": "That path doesn't exist or isn't a directory. Check the path and try again.",
+            "path_value": path_str,
+        })
+
+    # Scan for agents
+    detected = []
+    for d in sorted(path.iterdir()):
+        if d.is_dir() and d.name not in ("shared", "_subagents") and not d.name.startswith("."):
+            if (d / "CLAUDE.md").exists():
+                detected.append(d.name)
+
+    if not detected:
+        return templates.TemplateResponse("setup.html", {
+            "request": request,
+            "agency_title": agency_title,
+            "suggestion": suggestion,
+            "error": 'No agents found at this path. Agency looks for subdirectories containing a CLAUDE.md file. <a href="/admin/" class="underline">Set up manually in Settings</a>.',
+            "path_value": path_str,
+        })
+
+    # Derive group key (deduplicate)
+    base_key = path.name.lower().replace(" ", "-")
+    key = base_key
+    config = load_config()
+    counter = 2
+    while key in config.get("groups", {}):
+        key = f"{base_key}-{counter}"
+        counter += 1
+
+    name = path.name.replace("-", " ").title()
+
+    if "groups" not in config:
+        config["groups"] = {}
+    config["groups"][key] = {
+        "name": name,
+        "path": str(path),
+        "agents": detected,
+    }
+    if "agency" not in config:
+        config["agency"] = {}
+    config["agency"]["default_group"] = key
+
+    save_config(config)
+    reload_groups()
+
+    # Initialize shared folder structure
+    shared = path / "shared"
+    for subdir in ["clues", "curiosities", "decisions", "prompts", "logs"]:
+        (shared / subdir).mkdir(parents=True, exist_ok=True)
+    memory_path = shared / "memory.md"
+    if not memory_path.exists():
+        memory_path.write_text(f"# {name} — Shared Memory\n\nCollective knowledge and decisions.\n")
+
+    # Copy _clue-system-steps.md from an existing group if available
+    clue_steps_target = shared / "prompts" / "_clue-system-steps.md"
+    if not clue_steps_target.exists():
+        for other_key, other_g in config.get("groups", {}).items():
+            if other_key == key:
+                continue
+            source = Path(other_g["path"]) / "shared" / "prompts" / "_clue-system-steps.md"
+            if source.exists():
+                shutil.copy2(source, clue_steps_target)
+                break
+
+    for agent in detected:
+        (path / agent).mkdir(exist_ok=True)
+
+    return RedirectResponse(f"/{key}/", status_code=303)
 
 
 # ── Admin Routes ──────────────────────────────────────────────────────────────
