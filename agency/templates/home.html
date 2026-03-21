@@ -33,7 +33,7 @@
     {% for c in actionable_curiosities %}
     <a href="/{{ group }}/curiosities/{{ c._slug }}" class="block bg-white rounded-lg border border-purple-200 p-4 hover:border-purple-400 transition-colors">
       <div class="flex flex-wrap items-center gap-2 mb-1.5">
-        {{ c.get("origin_agent", "") | agent_badge }}
+        <a href="/{{ group }}/agents/{{ c.get('origin_agent', '') }}">{{ c.get("origin_agent", "") | agent_badge }}</a>
         {{ c.get("status", "") | status_badge }}
       </div>
       <div class="font-medium text-gray-900">{{ c._slug | replace("-", " ") | title }}</div>
@@ -57,7 +57,7 @@
     {% for c in open_clues %}
     <a href="/{{ group }}/clues/{{ c._slug }}" class="block bg-white rounded-lg border border-gray-200 p-3 hover:border-amber-300 transition-colors">
       <div class="flex flex-wrap items-center gap-2 mb-1">
-        {{ c.get("agent", "") | agent_badge }}
+        <a href="/{{ group }}/agents/{{ c.get('agent', '') }}">{{ c.get("agent", "") | agent_badge }}</a>
         {% if c.get("float") %}<span class="text-xs text-amber-600 font-medium">floated</span>{% endif %}
       </div>
       <div class="text-sm font-medium text-gray-900">{{ c._slug | replace("-", " ") }}</div>
@@ -76,7 +76,7 @@
     {% for c in floated_clues %}
     <a href="/{{ group }}/clues/{{ c._slug }}" class="block bg-amber-50 rounded-lg border border-amber-200 p-3 hover:border-amber-400 transition-colors">
       <div class="flex flex-wrap items-center gap-2 mb-1">
-        {{ c.get("agent", "") | agent_badge }}
+        <a href="/{{ group }}/agents/{{ c.get('agent', '') }}">{{ c.get("agent", "") | agent_badge }}</a>
         {{ c.get("status", "") | status_badge }}
       </div>
       <div class="text-sm font-medium text-gray-900">{{ c._slug | replace("-", " ") }}</div>

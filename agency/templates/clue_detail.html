@@ -10,7 +10,7 @@
 
 <div class="bg-white rounded-lg border border-gray-200 p-4 md:p-6">
   <div class="flex flex-wrap items-center gap-2 mb-3">
-    {{ meta.get("agent", "") | agent_badge }}
+    <a href="/{{ group }}/agents/{{ meta.get('agent', '') }}">{{ meta.get("agent", "") | agent_badge }}</a>
     {{ meta.get("status", "") | status_badge }}
     {% if meta.get("float") %}<span class="text-xs text-amber-600 font-medium">Floated</span>{% endif %}
   </div>
