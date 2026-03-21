@@ -91,6 +91,11 @@ def group_context(g: dict) -> dict:
     """Return standard template context for a group."""
     agency = get_agency_config()
     group_cfg = GROUPS.get(g["key"], {})
+    # Sidebar counts (lightweight — only reads clue/curiosity frontmatter)
+    clues = list_clues(g)
+    curiosities = list_curiosities(g)
+    open_clue_count = sum(1 for c in clues if c.get("status") == "open")
+    actionable_curiosity_count = sum(1 for c in curiosities if c.get("status") in ("proposed", "investigating"))
     return {
         "group": g["key"],
         "group_name": g["name"],
@@ -98,6 +103,9 @@ def group_context(g: dict) -> dict:
         "agency_title": agency.get("title", "Agency"),
         "admin_active": False,
         "tmux_config_available": bool(group_cfg.get("tmux_config")),
+        "nav_open_clues": open_clue_count,
+        "nav_actionable": actionable_curiosity_count,
+        "nav_agent_count": len(g["agents"]),
     }
 
 
