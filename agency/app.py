@@ -1606,6 +1606,12 @@ async def agent_profile(request: Request, group: str, agent: str):
     has_memory = (agent_dir / "memory.md").exists()
     memory_path = str(agent_dir / "memory.md") if has_memory else ""
 
+    # Get dispatch schedule for this agent
+    group_cfg = GROUPS.get(g["key"], {})
+    dispatch_cfg = group_cfg.get("dispatch", {})
+    agent_schedule = dispatch_cfg.get("agents", {}).get(agent, [])
+    dispatch_enabled = dispatch_cfg.get("enabled", False)
+
     return templates.TemplateResponse("agent_profile.html", {
         "request": request,
         **group_context(g),
@@ -1619,6 +1625,8 @@ async def agent_profile(request: Request, group: str, agent: str):
         "has_headshot": has_headshot,
         "has_memory": has_memory,
         "memory_path": memory_path,
+        "agent_schedule": agent_schedule,
+        "dispatch_enabled": dispatch_enabled,
     })
 
 
