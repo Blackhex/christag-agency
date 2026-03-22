@@ -5,8 +5,11 @@ import io
 import os
 import re
 import shutil
+import stat
+import subprocess
+import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import markdown
@@ -62,6 +65,108 @@ def get_agency_config() -> dict:
         "default_group": agency.get("default_group", "") or (list(GROUPS.keys())[0] if GROUPS else ""),
         "decided_by": agency.get("decided_by", "admin"),
     }
+
+
+# ── Dispatch Helpers ──────────────────────────────────────────────────────────
+
+DISPATCH_CONF_DIR = Path.home() / ".config" / "agency"
+DISPATCH_CONF_FILE = DISPATCH_CONF_DIR / "dispatch.conf"
+SYSTEMD_USER_DIR = Path.home() / ".config" / "systemd" / "user"
+
+
+def get_dispatch_status() -> dict:
+    """Return dispatch installation status."""
+    installed = CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False)
+    interval = CONFIG.get("agency", {}).get("dispatch", {}).get("interval", 15)
+    timer_active = False
+    if installed:
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "is-active", "agency-dispatch.timer"],
+                capture_output=True, text=True, timeout=5,
+            )
+            timer_active = result.stdout.strip() == "active"
+        except Exception:
+            timer_active = False
+    return {"installed": installed, "interval": interval, "timer_active": timer_active}
+
+
+def install_dispatch(interval: int = 15) -> str | None:
+    """Install dispatch systemd timer. Returns error string or None on success."""
+    try:
+        # 1. Create config directory
+        DISPATCH_CONF_DIR.mkdir(parents=True, exist_ok=True)
+
+        # 2. Find venv python
+        venv_python = Path(__file__).parent.parent / ".venv" / "bin" / "python3"
+        if not venv_python.exists():
+            venv_python = Path(sys.executable)
+
+        # 3. Write dispatch.conf
+        DISPATCH_CONF_FILE.write_text(
+            f"config_path={CONFIG_PATH}\nvenv_python={venv_python}\n"
+        )
+
+        # 4. Copy dispatch.sh
+        src_dispatch = Path(__file__).parent / "dispatch" / "dispatch.sh"
+        dst_dispatch = DISPATCH_CONF_DIR / "dispatch.sh"
+        shutil.copy2(src_dispatch, dst_dispatch)
+        dst_dispatch.chmod(dst_dispatch.stat().st_mode | stat.S_IEXEC)
+
+        # 5. Write systemd service
+        SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
+        service_file = SYSTEMD_USER_DIR / "agency-dispatch.service"
+        service_file.write_text(
+            "[Unit]\n"
+            "Description=Agency Agent Dispatch\n"
+            "\n"
+            "[Service]\n"
+            "Type=oneshot\n"
+            "ExecStart=%h/.config/agency/dispatch.sh\n"
+            "Environment=HOME=%h\n"
+        )
+
+        # 6. Write systemd timer
+        timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
+        timer_file.write_text(
+            "[Unit]\n"
+            "Description=Agency Agent Dispatch Timer\n"
+            "\n"
+            "[Timer]\n"
+            f"OnCalendar=*-*-* *:0/{interval}\n"
+            "Persistent=true\n"
+            "RandomizedDelaySec=60\n"
+            "\n"
+            "[Install]\n"
+            "WantedBy=timers.target\n"
+        )
+
+        # 7. Enable and start timer
+        subprocess.run(
+            ["systemctl", "--user", "daemon-reload"],
+            capture_output=True, text=True, timeout=10, check=True,
+        )
+        subprocess.run(
+            ["systemctl", "--user", "enable", "--now", "agency-dispatch.timer"],
+            capture_output=True, text=True, timeout=10, check=True,
+        )
+
+        # 8. Update config
+        config = load_config()
+        if "agency" not in config:
+            config["agency"] = {}
+        if "dispatch" not in config["agency"]:
+            config["agency"]["dispatch"] = {}
+        config["agency"]["dispatch"]["installed"] = True
+        config["agency"]["dispatch"]["interval"] = interval
+        save_config(config)
+
+        # 9. Reload
+        reload_groups()
+
+        return None
+    except Exception as e:
+        return str(e)
 
 
 app = FastAPI(title="Agency Dashboard")
@@ -158,8 +263,48 @@ def parse_csv_to_rows(text: str) -> tuple[list[str], list[list[str]]]:
     return rows[0], rows[1:]
 
 
+def check_ttl_expired(meta: dict) -> bool:
+    """Check if an item has exceeded its TTL based on date + ttl_days."""
+    ttl = meta.get("ttl_days")
+    if not ttl:
+        return False
+    item_date = meta.get("date")
+    if not item_date:
+        return False
+    if isinstance(item_date, str):
+        try:
+            item_date = datetime.fromisoformat(item_date)
+        except (ValueError, TypeError):
+            return False
+    elif not isinstance(item_date, datetime):
+        try:
+            # Handle date objects (not datetime)
+            item_date = datetime.combine(item_date, datetime.min.time())
+        except (TypeError, AttributeError):
+            return False
+    try:
+        ttl = int(ttl)
+    except (ValueError, TypeError):
+        return False
+    return datetime.now(tz=item_date.tzinfo) > item_date + timedelta(days=ttl)
+
+
+def enforce_ttl(filepath: Path, meta: dict) -> bool:
+    """Auto-archive an item if its TTL has expired. Returns True if archived."""
+    status = meta.get("status", "")
+    if status in ("archived", "dismissed", "approved", "rejected", "deferred"):
+        return False
+    if check_ttl_expired(meta):
+        raw = filepath.read_text()
+        raw = re.sub(r'^(status:\s*).*$', '\\1archived', raw, count=1, flags=re.MULTILINE)
+        filepath.write_text(raw)
+        meta["status"] = "archived"
+        return True
+    return False
+
+
 def list_clues(g: dict) -> list[dict]:
-    """List all clue files with parsed frontmatter."""
+    """List all clue files with parsed frontmatter. Enforces TTL auto-archiving."""
     clues_dir = g["shared"] / "clues"
     if not clues_dir.exists():
         return []
@@ -170,12 +315,13 @@ def list_clues(g: dict) -> list[dict]:
         meta["_filename"] = f.name
         meta["_body"] = body
         meta["_slug"] = f.stem
+        enforce_ttl(f, meta)
         clues.append(meta)
     return clues
 
 
 def list_curiosities(g: dict) -> list[dict]:
-    """List all curiosity files with parsed frontmatter."""
+    """List all curiosity files with parsed frontmatter. Enforces TTL auto-archiving."""
     curiosities_dir = g["shared"] / "curiosities"
     if not curiosities_dir.exists():
         return []
@@ -186,6 +332,7 @@ def list_curiosities(g: dict) -> list[dict]:
         meta["_filename"] = f.name
         meta["_body"] = body
         meta["_slug"] = f.stem
+        enforce_ttl(f, meta)
         items.append(meta)
     return items
 
@@ -462,6 +609,18 @@ def relative_time(dt: datetime | None) -> str:
 templates.env.filters["relative_time"] = relative_time
 
 
+def agent_health_status(last_seen: datetime | None) -> str:
+    """Return health status based on last seen time. green/amber/red."""
+    if last_seen is None:
+        return "red"
+    hours = (datetime.now() - last_seen).total_seconds() / 3600
+    if hours < 24:
+        return "green"
+    elif hours < 48:
+        return "amber"
+    return "red"
+
+
 def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
     """Build full agent info lists. Returns (agents, subagents)."""
     clues = list_clues(g)
@@ -474,9 +633,11 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
             continue
         identity = parse_agent_identity(agent_dir)
         open_count = sum(1 for c in clues if c.get("agent") == agent_name and c.get("status") == "open")
+        last_seen = get_agent_last_seen(g, agent_name)
         info = {
             "name": agent_name, "dir": agent_dir, **identity,
-            "last_seen": get_agent_last_seen(g, agent_name),
+            "last_seen": last_seen,
+            "health": agent_health_status(last_seen),
             "open_clues": open_count,
             "is_subagent": identity["frontmatter"].get("subagent", False),
             "has_headshot": find_headshot(agent_dir) is not None,
@@ -495,9 +656,11 @@ def collect_agents_with_identity(g: dict) -> tuple[list[dict], list[dict]]:
                 continue
             identity = parse_agent_identity(d)
             open_count = sum(1 for c in clues if c.get("agent") == d.name and c.get("status") == "open")
+            last_seen = get_agent_last_seen(g, d.name)
             subagents.append({
                 "name": d.name, "dir": d, **identity,
-                "last_seen": get_agent_last_seen(g, d.name),
+                "last_seen": last_seen,
+                "health": agent_health_status(last_seen),
                 "open_clues": open_count, "is_subagent": True,
                 "has_headshot": find_headshot(d) is not None,
             })
@@ -520,6 +683,58 @@ def get_agent_logs(g: dict, agent_name: str, limit: int = 20) -> list[dict]:
                 if len(results) >= limit:
                     return results
     return results
+
+
+def build_agent_timeline(g: dict, agent_name: str, limit: int = 30) -> list[dict]:
+    """Build an interleaved timeline of logs and clues for an agent."""
+    events = []
+
+    # Add logs
+    logs_dir = g["shared"] / "logs"
+    if logs_dir.exists():
+        for date_dir in sorted(logs_dir.iterdir(), reverse=True):
+            if not date_dir.is_dir():
+                continue
+            for f in sorted(date_dir.iterdir(), reverse=True):
+                if f.name.startswith(f"{agent_name}-") and f.suffix in (".out", ".err"):
+                    mtime = datetime.fromtimestamp(f.stat().st_mtime)
+                    events.append({
+                        "type": "log",
+                        "timestamp": mtime,
+                        "name": f.name,
+                        "path": str(f),
+                        "date": date_dir.name,
+                        "size": f.stat().st_size,
+                        "suffix": f.suffix,
+                    })
+
+    # Add clues
+    clues_dir = g["shared"] / "clues"
+    if clues_dir.exists():
+        for f in clues_dir.glob("*.md"):
+            raw = f.read_text()
+            meta, body = parse_frontmatter(raw)
+            if meta.get("agent") != agent_name:
+                continue
+            clue_date = meta.get("date")
+            if isinstance(clue_date, str):
+                try:
+                    clue_date = datetime.fromisoformat(clue_date)
+                except (ValueError, TypeError):
+                    clue_date = datetime.fromtimestamp(f.stat().st_mtime)
+            elif not isinstance(clue_date, datetime):
+                clue_date = datetime.fromtimestamp(f.stat().st_mtime)
+            events.append({
+                "type": "clue",
+                "timestamp": clue_date,
+                "slug": f.stem,
+                "status": meta.get("status", "open"),
+                "body_preview": body[:120],
+                "float": meta.get("float", False),
+            })
+
+    events.sort(key=lambda e: e["timestamp"], reverse=True)
+    return events[:limit]
 
 
 # ── Routes ───────────────────────────────────────────────────────────────────
@@ -719,6 +934,8 @@ async def admin_dashboard(request: Request):
         "groups": {k: v["name"] for k, v in groups.items()},
         "admin_active": True,
         "active": "admin",
+        "dispatch": get_dispatch_status(),
+        "dispatch_error": "",
     })
 
 
@@ -736,8 +953,81 @@ async def admin_save_settings(request: Request):
     if default_group:
         config["agency"]["default_group"] = default_group
 
+    # Handle dispatch interval update
+    dispatch_interval_raw = form.get("dispatch_interval", "")
+    if dispatch_interval_raw:
+        try:
+            new_interval = int(dispatch_interval_raw)
+            if 5 <= new_interval <= 120:
+                if "dispatch" not in config["agency"]:
+                    config["agency"]["dispatch"] = {}
+                old_interval = config["agency"]["dispatch"].get("interval", 15)
+                config["agency"]["dispatch"]["interval"] = new_interval
+                # If interval changed and dispatch is installed, rewrite timer
+                if new_interval != old_interval and config["agency"]["dispatch"].get("installed", False):
+                    timer_file = SYSTEMD_USER_DIR / "agency-dispatch.timer"
+                    timer_file.write_text(
+                        "[Unit]\n"
+                        "Description=Agency Agent Dispatch Timer\n"
+                        "\n"
+                        "[Timer]\n"
+                        f"OnCalendar=*-*-* *:0/{new_interval}\n"
+                        "Persistent=true\n"
+                        "RandomizedDelaySec=60\n"
+                        "\n"
+                        "[Install]\n"
+                        "WantedBy=timers.target\n"
+                    )
+                    subprocess.run(
+                        ["systemctl", "--user", "daemon-reload"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    subprocess.run(
+                        ["systemctl", "--user", "restart", "agency-dispatch.timer"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+        except (ValueError, TypeError):
+            pass
+
     save_config(config)
     reload_groups()
+    return RedirectResponse("/admin/", status_code=303)
+
+
+@app.post("/admin/dispatch/install", response_class=HTMLResponse)
+async def admin_dispatch_install(request: Request):
+    """Install the dispatch systemd timer."""
+    error = install_dispatch()
+    if error:
+        # Re-render admin page with error
+        config = load_config()
+        agency = config.get("agency", {"title": "Agency", "default_group": ""})
+        groups = config.get("groups", {})
+        orgs = []
+        for key, g in groups.items():
+            org_path = Path(g["path"])
+            shared_exists = (org_path / "shared").exists()
+            path_exists = org_path.exists()
+            orgs.append({
+                "key": key,
+                "name": g["name"],
+                "path": g["path"],
+                "agents": g.get("agents", []),
+                "agent_count": len(g.get("agents", [])),
+                "initialized": shared_exists,
+                "path_exists": path_exists,
+            })
+        return templates.TemplateResponse("admin.html", {
+            "request": request,
+            "agency_title": agency.get("title", "Agency"),
+            "default_group": agency.get("default_group", ""),
+            "orgs": orgs,
+            "groups": {k: v["name"] for k, v in groups.items()},
+            "admin_active": True,
+            "active": "admin",
+            "dispatch": get_dispatch_status(),
+            "dispatch_error": error,
+        })
     return RedirectResponse("/admin/", status_code=303)
 
 
@@ -1244,6 +1534,7 @@ async def agent_profile(request: Request, group: str, agent: str):
     last_seen = get_agent_last_seen(g, agent)
     logs = get_agent_logs(g, agent)
     clues = [c for c in list_clues(g) if c.get("agent") == agent][:10]
+    timeline = build_agent_timeline(g, agent)
     has_headshot = find_headshot(agent_dir) is not None
     has_memory = (agent_dir / "memory.md").exists()
     memory_path = str(agent_dir / "memory.md") if has_memory else ""
@@ -1257,6 +1548,7 @@ async def agent_profile(request: Request, group: str, agent: str):
         "last_seen": last_seen,
         "logs": logs,
         "clues": clues,
+        "timeline": timeline,
         "has_headshot": has_headshot,
         "has_memory": has_memory,
         "memory_path": memory_path,
@@ -1412,6 +1704,23 @@ async def clue_detail(request: Request, group: str, slug: str):
         raise HTTPException(404, "Clue not found")
     raw = path.read_text()
     meta, body = parse_frontmatter(raw)
+
+    # Resolve pipeline chain: clue → curiosity → decision
+    pipeline = None
+    linked_curiosity_slug = meta.get("linked_curiosity", "")
+    if linked_curiosity_slug:
+        curiosity_slug = linked_curiosity_slug.replace(".md", "")
+        curiosity_path = g["shared"] / "curiosities" / f"{curiosity_slug}.md"
+        pipeline = {"curiosity_slug": curiosity_slug, "curiosity_exists": curiosity_path.exists()}
+        # Check for a decision on that curiosity
+        decision_path = g["shared"] / "decisions" / f"{curiosity_slug}.md"
+        if decision_path.exists():
+            dmeta, _ = parse_frontmatter(decision_path.read_text())
+            pipeline["decision_slug"] = curiosity_slug
+            pipeline["decision_status"] = dmeta.get("decision", "")
+        else:
+            pipeline["decision_slug"] = None
+
     return templates.TemplateResponse("clue_detail.html", {
         "request": request,
         **group_context(g),
@@ -1420,6 +1729,7 @@ async def clue_detail(request: Request, group: str, slug: str):
         "body_raw": body,
         "slug": slug,
         "filename": path.name,
+        "pipeline": pipeline,
     })
 
 
@@ -1556,12 +1866,28 @@ async def decision_detail(request: Request, group: str, slug: str):
         raise HTTPException(404, "Decision not found")
     raw = path.read_text()
     meta, body = parse_frontmatter(raw)
+
+    # Resolve pipeline chain: clues → curiosity → this decision
+    pipeline_clues = []
+    curiosity_slug = (meta.get("curiosity", "") or "").replace(".md", "")
+    if curiosity_slug:
+        curiosity_path = g["shared"] / "curiosities" / f"{curiosity_slug}.md"
+        if curiosity_path.exists():
+            cmeta, _ = parse_frontmatter(curiosity_path.read_text())
+            for clue_file in cmeta.get("clues", []):
+                clue_slug = clue_file.replace(".md", "")
+                clue_path = g["shared"] / "clues" / clue_file
+                if clue_path.exists():
+                    pipeline_clues.append({"slug": clue_slug, "filename": clue_file})
+
     return templates.TemplateResponse("decision_detail.html", {
         "request": request,
         **group_context(g),
         "meta": meta,
         "body_html": render_md(body),
         "slug": slug,
+        "pipeline_clues": pipeline_clues,
+        "curiosity_slug": curiosity_slug,
     })
 
 
