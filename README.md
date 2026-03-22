@@ -1,178 +1,54 @@
 # Agency
 
-A lightweight dashboard for managing multiple groups of AI agents across your machine. Monitor what your agents are observing, review their proposals, edit their memory and prompts, and manage their infrastructure — all from a single web UI.
+A dashboard for managing AI agents that communicate through markdown files on your local machine.
 
-**No database. No Docker. No build step.** Just a Python server that reads markdown files off disk.
-
-## What It Does
-
-Agency gives you a control plane for AI agents that communicate through the filesystem. Each agent group is a directory of agents that share observations (clues), proposals (curiosities), and decisions through markdown files with YAML frontmatter.
-
-**Agent Profiles** — See each agent's identity, role definition, recent activity logs, and outstanding observations. Upload headshots, set display names, and toggle agents between primary and subagent roles.
-
-**Inbox** — A prioritized view of what needs your attention: open clues from agents, proposals waiting for your decision, and recent decisions you've made.
-
-**Clue/Curiosity/Decision Pipeline** — Agents observe things (clues). Observations converge into proposals worth considering (curiosities). You make the call (decisions). Agency surfaces this pipeline and lets you act on it.
-
-**Document & Memory Editor** — Browse and edit agent documents, shared memory files, and dispatch prompts directly in the browser.
-
-**Execution Logs** — View agent execution logs organized by date, filterable by agent.
-
-**Multi-Group Support** — Manage separate agent groups (e.g., one for a project, another for personal automation) with a group switcher in the sidebar.
-
-**Admin Panel** — Add, edit, and initialize new agent groups. Auto-detect agents by scanning directories for `CLAUDE.md` files. Optionally link a tmux session script per group for viewing/editing.
+**No database. No Docker. No build step.** Python + FastAPI + Tailwind CDN.
 
 ## Quick Start
 
 ```bash
-# Install
 pip install -e .
-
-# Run (from any directory — config.yaml is created in your working directory)
 agency
-
-# Or with options
-agency --port 8500 --host 0.0.0.0
 ```
 
-On first run, Agency creates a default `config.yaml` and launches a setup wizard. Enter the path to your agent directory (or click the suggestion chip), and Agency auto-detects your agents, initializes the shared folder structure, and drops you into your Inbox.
+On first run, a setup wizard walks you through pointing Agency at your agent directory. It auto-detects agents, creates the shared folder structure, and drops you into your Inbox.
 
-### Setting Up Additional Groups
+Visit `http://localhost:8500`.
 
-After the first-run wizard, you can add more groups from the admin panel:
+## How It Works
 
-1. Go to **Settings** in the sidebar
-2. Click **+ Add New Group**
-3. Give it a name and point it to a directory containing your agent subdirectories
-4. Click **Initialize** to create the shared folder structure
-5. Use **Auto-detect Agents** to scan for directories containing a `CLAUDE.md`
+Your agents write observations to the filesystem as markdown files with YAML frontmatter. Agency reads those files and presents a pipeline:
 
-### Expected Directory Structure
+1. **Clues** — agents observe something and write it down
+2. **Curiosities** — observations converge into proposals worth considering
+3. **Decisions** — you approve, defer, or reject through the UI
 
-Agency expects each agent group to follow this layout:
+Every item in the pipeline links to its upstream and downstream neighbors, so you can trace how an observation became an action.
 
-```
-your-agents/
-├── agent-one/
-│   ├── CLAUDE.md          # Agent role definition
-│   ├── memory.md          # Persistent agent knowledge
-│   └── headshot.png       # Optional avatar
-├── agent-two/
-│   └── CLAUDE.md
-├── _subagents/            # Optional — agents called by other agents
-│   └── helper-agent/
-│       └── CLAUDE.md
-└── shared/
-    ├── clues/             # Agent observations (markdown + YAML frontmatter)
-    ├── curiosities/       # Converged proposals
-    ├── decisions/         # Your decisions
-    ├── prompts/           # Dispatch routine prompts
-    ├── logs/              # Execution logs (YYYY-MM-DD subdirectories)
-    └── memory.md          # Cross-agent shared knowledge
-```
+## Features
 
-The **Initialize** button in admin creates the `shared/` structure for you.
-
-## Agent Identity
-
-Agents can have display names, titles, and emoji avatars stored as YAML frontmatter in their `CLAUDE.md`:
-
-```yaml
----
-display_name: "Researcher"
-title: "Senior Research Analyst"
-emoji: "🔍"
----
-# Research Agent
-
-Your agent's role definition goes here...
-```
-
-You can also upload a headshot image through the agent profile page. These appear in the agent list and profile views.
-
-## Configuration
-
-Agency uses a `config.yaml` file in your working directory:
-
-```yaml
-agency:
-  title: Agency                    # App title shown in sidebar
-  default_group: my-project        # Group to show on startup
-  decided_by: admin                # Default name for decisions
-
-groups:
-  my-project:
-    name: My Project Agents
-    path: /path/to/your/agents
-    agents:
-    - researcher
-    - writer
-    - reviewer
-    tmux_config: /path/to/tmux-session.sh  # Optional
-```
-
-See `config.yaml.example` for a full template.
-
-## Running as a Service
-
-A systemd user service template is provided at `agency.service.example`. Copy and customize it:
-
-```bash
-cp agency.service.example ~/.config/systemd/user/agency.service
-# Edit the file to set your paths
-
-systemctl --user daemon-reload
-systemctl --user enable --now agency.service
-```
+- **Agent profiles** with identity, activity timeline, and health monitoring (green/amber/red pulse)
+- **Inbox** that surfaces what needs your attention across all agents
+- **Pipeline tracking** with clickable clue/curiosity/decision chains
+- **TTL enforcement** that auto-archives stale items
+- **Document, memory, and prompt editing** in the browser
+- **Multi-group support** for separate agent directories
+- **Admin panel** for managing groups and agents
 
 ## Tech Stack
 
-- **Python 3.11+** with FastAPI + Jinja2
-- **Tailwind CSS** via CDN (no build step)
-- **No database** — all state is markdown files on disk
-- **No JavaScript framework** — vanilla HTML forms, `<details>` for collapsible sections
-- **6 dependencies:** `fastapi`, `uvicorn`, `jinja2`, `markdown`, `pyyaml`, `markupsafe`
+Python 3.11+ / FastAPI / Jinja2 / Tailwind CSS CDN / 6 dependencies / No JS framework
 
-## How Agents Write Data
+## Documentation
 
-Agency is a read/write dashboard — it doesn't run your agents. Your agents write clues, curiosities, and logs to the `shared/` directory as markdown files with YAML frontmatter. Agency reads those files and presents them in the UI.
+See the [`kb/`](kb/) folder:
 
-### Clue Format
-
-```yaml
----
-agent: researcher
-date: 2025-01-15T10:30:00
-category: data-quality
-status: open
-float: false
-ttl_days: 14
----
-
-Found inconsistency in the source dataset — three entries have duplicate IDs
-but different content. This may affect downstream analysis.
-```
-
-### Curiosity Format
-
-```yaml
----
-origin_agent: researcher
-date: 2025-01-15
-status: proposed
-clues: [duplicate-ids-found.md, data-drift-detected.md]
-ttl_days: 30
----
-
-Recommend implementing a deduplication pass before the analysis pipeline runs.
-Two related clues suggest this is a systemic issue, not a one-off.
-```
-
-Agency lets you **approve**, **defer**, or **reject** curiosities through the UI, creating decision records that your agents can read.
-
-## Screenshots
-
-*Coming soon*
+- [Directory Structure](kb/directory-structure.md) — expected agent group layout
+- [Agent Identity](kb/agent-identity.md) — display names, titles, avatars
+- [Data Formats](kb/data-formats.md) — clue, curiosity, and decision frontmatter
+- [Configuration](kb/configuration.md) — config.yaml reference
+- [Deployment](kb/deployment.md) — running as a systemd service
+- [Dispatch](kb/dispatch.md) — automatic agent scheduling
 
 ## License
 
