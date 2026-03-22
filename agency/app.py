@@ -102,9 +102,14 @@ def install_dispatch(interval: int = 15) -> str | None:
         if not venv_python.exists():
             venv_python = Path(sys.executable)
 
-        # 3. Write dispatch.conf
+        # 2b. Find claude CLI (systemd services may not have it in PATH)
+        claude_path = shutil.which("claude") or ""
+
+        # 3. Write dispatch.conf (values quoted for paths with spaces)
         DISPATCH_CONF_FILE.write_text(
-            f"config_path={CONFIG_PATH}\nvenv_python={venv_python}\n"
+            f'config_path="{CONFIG_PATH}"\n'
+            f'venv_python="{venv_python}"\n'
+            f'claude_path="{claude_path}"\n'
         )
 
         # 4. Copy dispatch.sh
@@ -112,6 +117,15 @@ def install_dispatch(interval: int = 15) -> str | None:
         dst_dispatch = DISPATCH_CONF_DIR / "dispatch.sh"
         shutil.copy2(src_dispatch, dst_dispatch)
         dst_dispatch.chmod(dst_dispatch.stat().st_mode | stat.S_IEXEC)
+
+        # 4b. Fix SELinux context so systemd can execute it (Fedora Kinoite)
+        try:
+            subprocess.run(
+                ["chcon", "-t", "bin_t", str(dst_dispatch)],
+                capture_output=True, timeout=5,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass  # chcon not available on non-SELinux systems
 
         # 5. Write systemd service
         SYSTEMD_USER_DIR.mkdir(parents=True, exist_ok=True)
@@ -903,19 +917,17 @@ async def tip_hide_all(request: Request):
 # ── Admin Routes ──────────────────────────────────────────────────────────────
 
 
-@app.get("/admin/", response_class=HTMLResponse)
-async def admin_dashboard(request: Request):
-    """Admin settings dashboard."""
+def admin_context(admin_page: str = "settings", dispatch_error: str = "") -> dict:
+    """Build common context for admin pages."""
     config = load_config()
     agency = config.get("agency", {"title": "Agency", "default_group": ""})
     groups = config.get("groups", {})
-
-    # Build org info with initialization status
     orgs = []
     for key, g in groups.items():
         org_path = Path(g["path"])
         shared_exists = (org_path / "shared").exists()
         path_exists = org_path.exists()
+        dispatch_cfg = g.get("dispatch", {})
         orgs.append({
             "key": key,
             "name": g["name"],
@@ -924,18 +936,45 @@ async def admin_dashboard(request: Request):
             "agent_count": len(g.get("agents", [])),
             "initialized": shared_exists,
             "path_exists": path_exists,
+            "dispatch_enabled": dispatch_cfg.get("enabled", False),
         })
-
-    return templates.TemplateResponse("admin.html", {
-        "request": request,
+    return {
         "agency_title": agency.get("title", "Agency"),
         "default_group": agency.get("default_group", ""),
         "orgs": orgs,
         "groups": {k: v["name"] for k, v in groups.items()},
         "admin_active": True,
         "active": "admin",
+        "admin_page": admin_page,
         "dispatch": get_dispatch_status(),
-        "dispatch_error": "",
+        "dispatch_error": dispatch_error,
+    }
+
+
+@app.get("/admin/", response_class=HTMLResponse)
+async def admin_settings_page(request: Request):
+    """Admin app settings page."""
+    return templates.TemplateResponse("admin_settings.html", {
+        "request": request,
+        **admin_context("settings"),
+    })
+
+
+@app.get("/admin/dispatch", response_class=HTMLResponse)
+async def admin_dispatch_page(request: Request):
+    """Admin dispatch configuration page."""
+    return templates.TemplateResponse("admin_dispatch.html", {
+        "request": request,
+        **admin_context("dispatch"),
+    })
+
+
+@app.get("/admin/groups", response_class=HTMLResponse)
+async def admin_groups_page(request: Request):
+    """Admin agent groups page."""
+    return templates.TemplateResponse("admin_groups.html", {
+        "request": request,
+        **admin_context("groups"),
     })
 
 
@@ -991,7 +1030,9 @@ async def admin_save_settings(request: Request):
 
     save_config(config)
     reload_groups()
-    return RedirectResponse("/admin/", status_code=303)
+    # Redirect back to dispatch page if interval was changed, otherwise settings
+    redirect = "/admin/dispatch" if dispatch_interval_raw else "/admin/"
+    return RedirectResponse(redirect, status_code=303)
 
 
 @app.post("/admin/dispatch/install", response_class=HTMLResponse)
@@ -999,36 +1040,11 @@ async def admin_dispatch_install(request: Request):
     """Install the dispatch systemd timer."""
     error = install_dispatch()
     if error:
-        # Re-render admin page with error
-        config = load_config()
-        agency = config.get("agency", {"title": "Agency", "default_group": ""})
-        groups = config.get("groups", {})
-        orgs = []
-        for key, g in groups.items():
-            org_path = Path(g["path"])
-            shared_exists = (org_path / "shared").exists()
-            path_exists = org_path.exists()
-            orgs.append({
-                "key": key,
-                "name": g["name"],
-                "path": g["path"],
-                "agents": g.get("agents", []),
-                "agent_count": len(g.get("agents", [])),
-                "initialized": shared_exists,
-                "path_exists": path_exists,
-            })
-        return templates.TemplateResponse("admin.html", {
+        return templates.TemplateResponse("admin_dispatch.html", {
             "request": request,
-            "agency_title": agency.get("title", "Agency"),
-            "default_group": agency.get("default_group", ""),
-            "orgs": orgs,
-            "groups": {k: v["name"] for k, v in groups.items()},
-            "admin_active": True,
-            "active": "admin",
-            "dispatch": get_dispatch_status(),
-            "dispatch_error": error,
+            **admin_context("dispatch", dispatch_error=error),
         })
-    return RedirectResponse("/admin/", status_code=303)
+    return RedirectResponse("/admin/dispatch", status_code=303)
 
 
 @app.get("/admin/orgs/new", response_class=HTMLResponse)
@@ -1041,6 +1057,7 @@ async def admin_org_new(request: Request):
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
         "active": "admin",
+        "admin_page": "groups",
         "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
         "mode": "create",
         "org_key": "",
@@ -1121,7 +1138,7 @@ async def admin_org_create(request: Request):
             "warning": warning + " Org saved successfully.",
         })
 
-    return RedirectResponse("/admin/", status_code=303)
+    return RedirectResponse("/admin/groups", status_code=303)
 
 
 @app.get("/admin/orgs/{org}/edit", response_class=HTMLResponse)
@@ -1151,6 +1168,7 @@ async def admin_org_edit(request: Request, org: str):
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
         "active": "admin",
+        "admin_page": "groups",
         "groups": {k: v["name"] for k, v in groups.items()},
         "mode": "edit",
         "org_key": org,
@@ -1292,7 +1310,7 @@ async def admin_org_delete(request: Request, org: str):
 
     save_config(config)
     reload_groups()
-    return RedirectResponse("/admin/", status_code=303)
+    return RedirectResponse("/admin/groups", status_code=303)
 
 
 @app.post("/admin/orgs/{org}/initialize", response_class=HTMLResponse)
@@ -1334,7 +1352,7 @@ async def admin_org_initialize(request: Request, org: str):
     for agent in g.get("agents", []):
         (base / agent).mkdir(exist_ok=True)
 
-    return RedirectResponse("/admin/", status_code=303)
+    return RedirectResponse("/admin/groups", status_code=303)
 
 
 @app.post("/admin/orgs/{org}/autodetect", response_class=HTMLResponse)
@@ -1369,6 +1387,7 @@ async def admin_org_autodetect(request: Request, org: str):
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
         "active": "admin",
+        "admin_page": "groups",
         "groups": {k: v["name"] for k, v in config.get("groups", {}).items()},
         "mode": "edit",
         "org_key": org,
@@ -1433,6 +1452,7 @@ async def admin_agent_detail(request: Request, org: str, agent: str):
         "agency_title": agency.get("title", "Agency"),
         "admin_active": True,
         "active": "admin",
+        "admin_page": "groups",
         "groups": {k: v["name"] for k, v in groups.items()},
         "org_key": org,
         "org_name": g["name"],
