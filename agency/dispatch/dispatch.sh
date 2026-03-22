@@ -35,6 +35,8 @@ if [[ -z "${venv_python:-}" ]]; then
     log "ERROR: venv_python not set in $DISPATCH_CONF"
     exit 1
 fi
+# claude_path is optional — fall back to bare "claude" in PATH
+CLAUDE_CMD="${claude_path:-claude}"
 if [[ ! -f "$config_path" ]]; then
     log "ERROR: config.yaml not found at $config_path"
     exit 1
@@ -236,7 +238,7 @@ run_agent() {
 
     (
         cd "$agent_dir"
-        timeout "${timeout_secs}" claude --dangerously-skip-permissions \
+        timeout "${timeout_secs}" "$CLAUDE_CMD" --dangerously-skip-permissions \
             -p "$(cat "$prompt_path")" \
             > "$out_file" \
             2> "$err_file"
@@ -264,7 +266,8 @@ while IFS= read -r group_json; do
     log "Processing group: ${group_key}"
 
     # Ensure log directory exists
-    log_dir="${group_path}/shared/logs/${TODAY}"
+    logs_root="${group_path}/shared/logs"
+    log_dir="${logs_root}/${TODAY}"
     mkdir -p "$log_dir"
 
     # Daily limit check: count .out files in today's log dir
@@ -312,7 +315,8 @@ while IFS= read -r group_json; do
                     should_run=true
                 fi
             elif [[ -n "$every_val" ]]; then
-                every_marker="${log_dir}/.last-${agent_name}-${stem}"
+                # every markers live in logs root (not daily dir) to persist across days
+                every_marker="${logs_root}/.last-${agent_name}-${stem}"
                 if check_every_rule "$every_marker" "$every_val"; then
                     should_run=true
                 fi
@@ -328,7 +332,7 @@ while IFS= read -r group_json; do
                 if [[ -n "$at_time" ]]; then
                     touch "${log_dir}/.event-${agent_name}-${stem}"
                 elif [[ -n "$every_val" ]]; then
-                    touch "${log_dir}/.last-${agent_name}-${stem}"
+                    touch "${logs_root}/.last-${agent_name}-${stem}"
                 fi
             fi
 
