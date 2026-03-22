@@ -1139,6 +1139,13 @@ async def admin_org_edit(request: Request, org: str):
     # Build rich agent info
     agent_infos = [get_agent_info(base, a) for a in g.get("agents", [])]
 
+    # Dispatch config for this group
+    dispatch_cfg = g.get("dispatch", {})
+    prompts = []
+    prompts_dir = Path(g["path"]) / "shared" / "prompts"
+    if prompts_dir.exists():
+        prompts = sorted(f.name for f in prompts_dir.glob("*.md"))
+
     return templates.TemplateResponse("admin_org_edit.html", {
         "request": request,
         "agency_title": agency.get("title", "Agency"),
@@ -1152,6 +1159,12 @@ async def admin_org_edit(request: Request, org: str):
         "org_agents": "\n".join(g.get("agents", [])),
         "org_tmux_config": g.get("tmux_config", ""),
         "agent_infos": agent_infos,
+        "dispatch_enabled": dispatch_cfg.get("enabled", False),
+        "dispatch_timeout": dispatch_cfg.get("timeout", 300),
+        "dispatch_daily_limit": dispatch_cfg.get("daily_limit", 20),
+        "dispatch_agents": dispatch_cfg.get("agents", {}),
+        "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
+        "available_prompts": prompts,
         "warning": "",
     })
 
@@ -1201,10 +1214,64 @@ async def admin_org_save(request: Request, org: str):
             "org_agents": "\n".join(agents),
             "org_tmux_config": tmux_config,
             "agent_infos": [get_agent_info(Path(config["groups"][org]["path"]), a) for a in agents],
+            "dispatch_enabled": config["groups"][org].get("dispatch", {}).get("enabled", False),
+            "dispatch_timeout": config["groups"][org].get("dispatch", {}).get("timeout", 300),
+            "dispatch_daily_limit": config["groups"][org].get("dispatch", {}).get("daily_limit", 20),
+            "dispatch_agents": config["groups"][org].get("dispatch", {}).get("agents", {}),
+            "dispatch_installed": CONFIG.get("agency", {}).get("dispatch", {}).get("installed", False),
+            "available_prompts": sorted(f.name for f in (Path(path) / "shared" / "prompts").glob("*.md")) if (Path(path) / "shared" / "prompts").exists() else [],
             "warning": warning + " Changes saved.",
         })
 
     return RedirectResponse("/admin/", status_code=303)
+
+
+@app.post("/admin/orgs/{org}/dispatch", response_class=HTMLResponse)
+async def admin_org_dispatch_save(request: Request, org: str):
+    """Save dispatch config for an org."""
+    config = load_config()
+    if org not in config.get("groups", {}):
+        raise HTTPException(404, f"Unknown org: {org}")
+
+    form = await request.form()
+    enabled = form.get("enabled") == "on"
+    timeout = int(form.get("timeout", 300))
+    daily_limit = int(form.get("daily_limit", 20))
+
+    g = config["groups"][org]
+    agents_list = g.get("agents", [])
+
+    agents_dispatch = {}
+    for agent in agents_list:
+        rules = []
+        idx = 0
+        while True:
+            rule_type = form.get(f"rule_type_{agent}_{idx}")
+            if rule_type is None:
+                break
+            rule_value = form.get(f"rule_value_{agent}_{idx}", "").strip()
+            rule_prompt = form.get(f"rule_prompt_{agent}_{idx}", "").strip()
+            if rule_value and rule_prompt:
+                rule = {"prompt": rule_prompt}
+                if rule_type == "at":
+                    rule["at"] = rule_value
+                else:
+                    rule["every"] = rule_value
+                rules.append(rule)
+            idx += 1
+        if rules:
+            agents_dispatch[agent] = rules
+
+    config["groups"][org]["dispatch"] = {
+        "enabled": enabled,
+        "timeout": timeout,
+        "daily_limit": daily_limit,
+        "agents": agents_dispatch,
+    }
+
+    save_config(config)
+    reload_groups()
+    return RedirectResponse(f"/admin/orgs/{org}/edit", status_code=303)
 
 
 @app.post("/admin/orgs/{org}/delete", response_class=HTMLResponse)

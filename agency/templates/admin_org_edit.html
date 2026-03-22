@@ -69,6 +69,84 @@
     </div>
   </form>
 
+  {% if mode == 'edit' and dispatch_installed %}
+  <!-- Dispatch Schedule -->
+  <form method="post" action="/admin/orgs/{{ org_key }}/dispatch"
+        class="bg-white rounded-xl border border-gray-200 p-6 space-y-5 mb-8">
+
+    <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Dispatch Schedule</h2>
+
+    <div class="flex flex-wrap items-center gap-6">
+      <label class="flex items-center gap-2 text-sm text-gray-700">
+        <input type="checkbox" name="enabled" {% if dispatch_enabled %}checked{% endif %}
+               class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500">
+        Enabled
+      </label>
+
+      <div class="flex items-center gap-2">
+        <label for="dispatch-timeout" class="text-sm text-gray-700">Timeout (s)</label>
+        <input type="number" name="timeout" id="dispatch-timeout" value="{{ dispatch_timeout }}"
+               min="60" max="1800" step="60"
+               class="w-24 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+      </div>
+
+      <div class="flex items-center gap-2">
+        <label for="dispatch-daily-limit" class="text-sm text-gray-700">Daily limit</label>
+        <input type="number" name="daily_limit" id="dispatch-daily-limit" value="{{ dispatch_daily_limit }}"
+               min="1" max="100"
+               class="w-20 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+      </div>
+    </div>
+
+    <!-- Per-agent schedule rules -->
+    {% for agent in org_agents.split('\n') %}
+    {% if agent.strip() %}
+    {% set agent_name = agent.strip() %}
+    <div class="border border-gray-100 rounded-lg p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-gray-800">{{ agent_name }}</h3>
+        <button type="button" onclick="addRule('{{ agent_name }}')"
+                class="px-2 py-1 text-xs font-medium text-indigo-600 bg-indigo-50 rounded hover:bg-indigo-100 transition-colors">
+          + Add rule
+        </button>
+      </div>
+      <div id="rules-{{ agent_name }}" class="space-y-2">
+        {% for rule in dispatch_agents.get(agent_name, []) %}
+        <div class="flex items-center gap-2">
+          <select name="rule_type_{{ agent_name }}_{{ loop.index0 }}"
+                  class="px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+            <option value="at" {% if rule.get('at') %}selected{% endif %}>at</option>
+            <option value="every" {% if rule.get('every') %}selected{% endif %}>every</option>
+          </select>
+          <input type="text" name="rule_value_{{ agent_name }}_{{ loop.index0 }}"
+                 value="{{ rule.get('at', rule.get('every', '')) }}" placeholder="09:00 or 6h"
+                 class="w-32 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+          <select name="rule_prompt_{{ agent_name }}_{{ loop.index0 }}"
+                  class="flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500">
+            <option value="">-- prompt --</option>
+            {% for p in available_prompts %}
+            <option value="{{ p }}" {% if p == rule.get('prompt') %}selected{% endif %}>{{ p }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" onclick="this.parentElement.remove()"
+                  class="px-2 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 transition-colors">
+            Remove
+          </button>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
+    <div class="pt-2">
+      <button type="submit" class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-lg hover:bg-indigo-700 transition-colors">
+        Save Dispatch Config
+      </button>
+    </div>
+  </form>
+  {% endif %}
+
   {% if mode == 'edit' %}
   <!-- Agent Roster -->
   <div class="mb-8">
@@ -198,6 +276,75 @@ function autodetectAgents() {
   form.action = '/admin/orgs/{{ org_key }}/autodetect';
   document.body.appendChild(form);
   form.submit();
+}
+
+var availablePrompts = {{ available_prompts | tojson }};
+var ruleCounters = {};
+
+// Initialize counters from existing rules
+document.querySelectorAll('[id^="rules-"]').forEach(function(container) {
+  var agent = container.id.replace('rules-', '');
+  ruleCounters[agent] = container.children.length;
+});
+
+function addRule(agent) {
+  if (!(agent in ruleCounters)) {
+    ruleCounters[agent] = 0;
+  }
+  var idx = ruleCounters[agent];
+  ruleCounters[agent]++;
+
+  var container = document.getElementById('rules-' + agent);
+  if (!container) return;
+
+  var row = document.createElement('div');
+  row.className = 'flex items-center gap-2';
+
+  var typeSelect = document.createElement('select');
+  typeSelect.name = 'rule_type_' + agent + '_' + idx;
+  typeSelect.className = 'px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
+  var optAt = document.createElement('option');
+  optAt.value = 'at';
+  optAt.textContent = 'at';
+  var optEvery = document.createElement('option');
+  optEvery.value = 'every';
+  optEvery.textContent = 'every';
+  typeSelect.appendChild(optAt);
+  typeSelect.appendChild(optEvery);
+
+  var valueInput = document.createElement('input');
+  valueInput.type = 'text';
+  valueInput.name = 'rule_value_' + agent + '_' + idx;
+  valueInput.placeholder = '09:00 or 6h';
+  valueInput.className = 'w-32 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
+
+  var promptSelect = document.createElement('select');
+  promptSelect.name = 'rule_prompt_' + agent + '_' + idx;
+  promptSelect.className = 'flex-1 px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500';
+  var defaultOpt = document.createElement('option');
+  defaultOpt.value = '';
+  defaultOpt.textContent = '-- prompt --';
+  promptSelect.appendChild(defaultOpt);
+  for (var i = 0; i < availablePrompts.length; i++) {
+    var opt = document.createElement('option');
+    opt.value = availablePrompts[i];
+    opt.textContent = availablePrompts[i];
+    promptSelect.appendChild(opt);
+  }
+
+  var removeBtn = document.createElement('button');
+  removeBtn.type = 'button';
+  removeBtn.className = 'px-2 py-1.5 text-xs font-medium text-red-600 bg-red-50 rounded hover:bg-red-100 transition-colors';
+  removeBtn.textContent = 'Remove';
+  removeBtn.addEventListener('click', function() {
+    row.remove();
+  });
+
+  row.appendChild(typeSelect);
+  row.appendChild(valueInput);
+  row.appendChild(promptSelect);
+  row.appendChild(removeBtn);
+  container.appendChild(row);
 }
 </script>
 {% endif %}
